@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognitive Tracker Overlay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+            background: transparent;
+            -webkit-app-region: no-drag;
+        }
+
+        #overlay-container {
+            position: relative;
+            width: 350px;
+            height: 220px;
+            opacity: 1;  /* Start visible */
+            transform: translateX(0);  /* Start in position */
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        #overlay-container.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        #overlay-container.hide {
+            opacity: 0;
+            transform: translateX(50px);
+        }
+
+        .glass-card {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: rgba(26, 26, 46, 0.95);  /* Dark glass background */
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.2);  /* Subtle white border */
+            box-shadow:
+                0 8px 32px 0 rgba(0, 0, 0, 0.6),
+                0 0 20px 0 rgba(102, 126, 234, 0.3),
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .status-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-icon {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            position: relative;
+            box-shadow: 0 0 12px currentColor;
+        }
+
+        .status-icon::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.3;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.3; }
+            50% { transform: scale(1.5); opacity: 0; }
+        }
+
+        .status-icon.success {
+            background: #10b981;
+            color: #10b981;
+        }
+
+        .status-icon.warning {
+            background: #f59e0b;
+            color: #f59e0b;
+        }
+
+        .status-icon.error {
+            background: #ef4444;
+            color: #ef4444;
+        }
+
+        .status-icon.info {
+            background: #3b82f6;
+            color: #3b82f6;
+        }
+
+        .status-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .status-message {
+            font-size: 14px;
+            font-weight: 500;
+            color: #ffffff;
+            line-height: 1.6;
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            max-height: 140px;
+            overflow-y: auto;
+        }
+
+        .batch-counter {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .progress-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 0 0 16px 16px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        /* Alert specific styles */
+        .glass-card.alert {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .glass-card.alert.warning {
+            border-color: rgba(245, 158, 11, 0.3);
+            box-shadow:
+                0 8px 32px 0 rgba(245, 158, 11, 0.2),
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-card.alert.error {
+            border-color: rgba(239, 68, 68, 0.3);
+            box-shadow:
+                0 8px 32px 0 rgba(239, 68, 68, 0.2),
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+        }
+
+        /* Micro-interactions */
+        .glass-card {
+            animation: float 6s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-4px); }
+        }
+
+        /* Alert badge */
+        .alert-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: 2px solid rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+    </style>
+</head>
+<body>
+    <div id="overlay-container">
+        <div class="glass-card" id="glass-card">
+            <div class="status-header">
+                <div class="status-icon success" id="status-icon"></div>
+                <span class="status-title" id="status-title">COGNITIVE TRACKER</span>
+            </div>
+            <div class="status-message" id="status-message">
+                Initializing tracking system...
+            </div>
+            <div class="batch-counter" id="batch-counter">0 batches</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const container = document.getElementById('overlay-container');
+        const glassCard = document.getElementById('glass-card');
+        const statusIcon = document.getElementById('status-icon');
+        const statusTitle = document.getElementById('status-title');
+        const statusMessage = document.getElementById('status-message');
+        const batchCounter = document.getElementById('batch-counter');
+        const progressFill = document.getElementById('progress-fill');
+
+        let batchCount = 0;
+
+        // Update overlay content
+        window.electronAPI.onOverlayUpdate((event, data) => {
+            const { type, message, isAlert, persistent } = data;
+
+            console.log('[Overlay UI] Received update:', { type, message, isAlert, persistent });
+
+            // Update icon
+            statusIcon.className = `status-icon ${type}`;
+
+            // Update title
+            statusTitle.textContent = isAlert ? '⚠️ ALERT' : 'COGNITIVE TRACKER';
+
+            // Update message
+            statusMessage.textContent = message;
+
+            // Update card style for alerts
+            if (isAlert) {
+                glassCard.classList.add('alert', type);
+                console.log('[Overlay UI] Alert mode activated:', type);
+            } else {
+                glassCard.classList.remove('alert', 'warning', 'error');
+            }
+
+            // Show with animation
+            container.classList.remove('hide');
+            container.classList.add('show');
+
+            // Animate progress bar
+            progressFill.style.width = '100%';
+            setTimeout(() => {
+                progressFill.style.width = '0%';
+            }, 100);
+
+            console.log('[Overlay UI] Update applied successfully');
+        });
+
+        // Update batch count
+        window.electronAPI.onBatchCount((event, count) => {
+            batchCount = count;
+            batchCounter.textContent = `${count} batches`;
+        });
+
+        // Hide overlay
+        window.electronAPI.onOverlayHide(() => {
+            container.classList.remove('show');
+            container.classList.add('hide');
+        });
+
+        console.log('[Overlay] UI Ready');
+    </script>
+</body>
+</html>

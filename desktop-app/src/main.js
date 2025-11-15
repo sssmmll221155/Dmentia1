@@ -9,6 +9,8 @@ const { uIOhook } = require('uiohook-napi');
 const Store = require('electron-store');
 const axios = require('axios');
 const { machineIdSync } = require('node-machine-id');
+const overlayManager = require('./overlay/overlayManager');
+const { detectDeviations, detectNavigationConfusion } = require('./baseline-detection');
 
 // Configuration store
 const store = new Store();
@@ -18,6 +20,8 @@ let mainWindow = null;
 let tray = null;
 let isTracking = false;
 let userId = null;
+let totalBatchesSent = 0;
+let latestGazeAnalytics = null;
 
 // Event buffers (same as web tracker)
 const eventBuffers = {
@@ -44,7 +48,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    show: true, // Show window on startup
+    show: false, // Will show manually after load
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -53,6 +57,11 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'dashboard-new.html'));
+
+  // Show window without stealing focus once loaded
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.showInactive();
+  });
 
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
@@ -320,6 +329,36 @@ async function processBatch() {
 
   const metrics = computeBatchMetrics(eventBuffers.batchStartTime, batchEndTime);
 
+  // DETECT DEVIATIONS FROM BASELINE
+  const deviationAnalysis = detectDeviations(metrics);
+
+  console.log('[Detection] Correlation Score:', deviationAnalysis.correlationScore + '%', '- Severity:', deviationAnalysis.severity);
+
+  // Show alerts in overlay if any deviations detected
+  if (deviationAnalysis.alerts.length > 0) {
+    for (const alert of deviationAnalysis.alerts) {
+      console.log(`[Alert] ${alert.severity}: ${alert.message}`);
+
+      // Show most severe alert in overlay
+      if (alert.severity === 'CRITICAL' || alert.severity === 'HIGH') {
+        overlayManager.showAlert(
+          alert.severity.toLowerCase(),
+          `${alert.metric}: ${alert.message}`,
+          false // Don't auto-hide critical alerts
+        );
+      }
+    }
+
+    // If correlation score is high, show overall alert
+    if (deviationAnalysis.correlationScore >= 60) {
+      overlayManager.showAlert(
+        'error',
+        `⚠️ ${deviationAnalysis.correlationScore}% metrics declining - ${deviationAnalysis.flaggedMetrics.length}/${8} flagged`,
+        false
+      );
+    }
+  }
+
   // Clear buffers
   eventBuffers.keyboard = [];
   eventBuffers.mouse = [];
@@ -332,6 +371,75 @@ async function processBatch() {
   // Notify dashboard
   if (mainWindow) {
     mainWindow.webContents.send('batch-sent', metrics);
+  }
+
+  // Update overlay
+  totalBatchesSent++;
+  overlayManager.updateBatchCount(totalBatchesSent);
+
+  // Build detailed status message with specific alert details
+  let statusMessage = `Tracking Active • ${totalBatchesSent} batches`;
+
+  if (deviationAnalysis.correlationScore > 0 && deviationAnalysis.alerts.length > 0) {
+    // Get the most severe alert for detailed display
+    const topAlert = deviationAnalysis.alerts[0];
+
+    // Convert technical metrics to consumer-friendly language
+    const friendlyExplanations = {
+      'Inter-key interval': 'typing more slowly between keystrokes',
+      'Error rate': 'making more typing mistakes',
+      'Key hold time': 'holding down keys longer than usual',
+      'Movement speed': 'moving your mouse more slowly',
+      'Fixation duration': 'taking longer to focus on what you\'re looking at',
+      'Re-reading frequency': 're-reading the same content more often',
+      'Google in Google': 'searching for Google while on Google (confusion detected)'
+    };
+
+    const explanation = friendlyExplanations[topAlert.metric] || topAlert.metric.toLowerCase();
+
+    // Check if severity includes "IF_CONTINUES" flag
+    const isConditional = deviationAnalysis.severity.includes('_IF_CONTINUES');
+    const baseSeverity = deviationAnalysis.severity.replace('_IF_CONTINUES', '');
+
+    // Build friendly message with severity level
+    const severityText = {
+      'CRITICAL': 'Critical',
+      'HIGH': 'High',
+      'MEDIUM': 'Medium',
+      'LOW': 'Low',
+      'NORMAL': 'Normal'
+    };
+
+    const severityLabel = severityText[baseSeverity] || baseSeverity;
+
+    // Build message based on whether it's a pattern or a warning
+    if (isConditional) {
+      // Single extreme deviation - warn about potential if it continues
+      statusMessage = `${severityLabel} Concern if this continues: We've noticed you're ${explanation} (${topAlert.deviation} from your baseline). If this pattern repeats, it would indicate a ${severityLabel.toLowerCase()} concern.`;
+    } else {
+      // Multiple metrics affected - it's already a pattern
+      statusMessage = `${severityLabel} Concern: We've noticed you're ${explanation} (${topAlert.deviation} from your baseline). Overall performance change: ${deviationAnalysis.correlationScore}%`;
+    }
+
+    // If multiple alerts, add count
+    if (deviationAnalysis.alerts.length > 1) {
+      statusMessage += `. ${deviationAnalysis.alerts.length - 1} other ${deviationAnalysis.alerts.length > 2 ? 'changes' : 'change'} detected.`;
+    }
+  }
+
+  overlayManager.showTrackingActive(totalBatchesSent);
+
+  if (deviationAnalysis.correlationScore > 0) {
+    // Get base severity without _IF_CONTINUES flag
+    const baseSeverity = deviationAnalysis.severity.replace('_IF_CONTINUES', '');
+    const isConditional = deviationAnalysis.severity.includes('_IF_CONTINUES');
+
+    // Conditional warnings are less urgent (info), actual patterns are warnings
+    const statusType = isConditional ? 'info' :
+      (baseSeverity === 'CRITICAL' || baseSeverity === 'HIGH' ? 'warning' :
+       baseSeverity === 'MEDIUM' ? 'warning' : 'info');
+
+    overlayManager.showStatus(statusMessage, statusType);
   }
 }
 
@@ -458,7 +566,7 @@ function computeBatchMetrics(startTime, endTime) {
       meanScrollSpeed: 0, // Would need to compute from rotation
       upScrollFraction
     },
-    gaze: null, // Desktop app doesn't do gaze tracking (yet)
+    gaze: latestGazeAnalytics, // Include gaze analytics from dashboard
     page: {
       url: `desktop://${activeApp}`,
       domain: 'desktop'
@@ -488,6 +596,7 @@ async function sendMetrics(metrics) {
     console.log('[Desktop] Metrics sent successfully');
   } catch (error) {
     console.error('[Desktop] Failed to send metrics:', error.message);
+    overlayManager.showAlert('error', 'Failed to send metrics', true);
   }
 }
 
@@ -552,6 +661,10 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
 
+  // Create overlay
+  overlayManager.createOverlay();
+  overlayManager.showStatus('Starting cognitive tracker...', 'info');
+
   // Auto-start tracking
   startTracking();
 });
@@ -562,6 +675,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   stopTracking();
+  overlayManager.destroy();
 });
 
 // IPC handlers for dashboard
@@ -570,4 +684,29 @@ ipcMain.handle('get-tracking-status', () => isTracking);
 ipcMain.handle('toggle-tracking', () => {
   toggleTracking();
   return isTracking;
+});
+
+// Listen for gaze analytics from dashboard
+ipcMain.on('gaze-analytics', (event, gazeAnalytics) => {
+  latestGazeAnalytics = gazeAnalytics;
+  console.log('[Desktop] Received gaze analytics:', {
+    fixations: gazeAnalytics.fixationCount,
+    saccades: gazeAnalytics.saccadeCount,
+    readingPatterns: gazeAnalytics.readingPatternCount,
+    rereading: gazeAnalytics.rereadingEventCount
+  });
+});
+
+// Listen for navigation updates for Google in Google detection
+ipcMain.on('navigation-update', (event, { url, searchQuery }) => {
+  // Check for Google in Google confusion
+  const confusionAlert = detectNavigationConfusion(url, searchQuery);
+  if (confusionAlert) {
+    console.log('[Alert] CRITICAL - Google in Google detected!');
+    overlayManager.showAlert(
+      'error',
+      confusionAlert.message,
+      false // Don't auto-hide - this is critical
+    );
+  }
 });

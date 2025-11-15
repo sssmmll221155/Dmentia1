@@ -53,6 +53,59 @@ const BatchMetricsSchema = z.object({
           timestamp: z.number(),
         })
       ),
+      // Detailed eye tracking metrics
+      fixations: z.array(
+        z.object({
+          timestamp: z.number(),
+          x: z.number(),
+          y: z.number(),
+          durationMs: z.number(),
+          regionId: z.string().optional(),
+        })
+      ).optional(),
+      saccades: z.array(
+        z.object({
+          timestamp: z.number(),
+          fromX: z.number(),
+          fromY: z.number(),
+          toX: z.number(),
+          toY: z.number(),
+          velocityPxPerSec: z.number(),
+          amplitudePx: z.number(),
+          durationMs: z.number(),
+        })
+      ).optional(),
+      readingPatterns: z.array(
+        z.object({
+          timestamp: z.number(),
+          direction: z.enum(['left-to-right', 'right-to-left', 'top-to-bottom', 'irregular']),
+          speedWordsPerMin: z.number().optional(),
+          lineCount: z.number().int(),
+          regressionCount: z.number().int(),
+        })
+      ).optional(),
+      rereadingEvents: z.array(
+        z.object({
+          regionId: z.string(),
+          visitCount: z.number().int(),
+          timestamps: z.array(z.number()),
+          totalDurationMs: z.number(),
+        })
+      ).optional(),
+      regionFocuses: z.array(
+        z.object({
+          regionId: z.string(),
+          regionLabel: z.string().optional(),
+          x: z.number(),
+          y: z.number(),
+          width: z.number(),
+          height: z.number(),
+          focusDurationMs: z.number(),
+          fixationCount: z.number().int(),
+          firstVisitTimestamp: z.number(),
+          lastVisitTimestamp: z.number(),
+        })
+      ).optional(),
     })
     .nullable(),
 
@@ -118,6 +171,78 @@ router.post('/', async (req, res) => {
                 timestamp: BigInt(point.timestamp),
                 x: point.x,
                 y: point.y,
+              })),
+            }
+          : undefined,
+
+        // Create fixation events if provided
+        fixationEvents: data.gaze?.fixations
+          ? {
+              create: data.gaze.fixations.map((fixation) => ({
+                timestamp: BigInt(fixation.timestamp),
+                x: fixation.x,
+                y: fixation.y,
+                durationMs: fixation.durationMs,
+                regionId: fixation.regionId,
+              })),
+            }
+          : undefined,
+
+        // Create saccade events if provided
+        saccadeEvents: data.gaze?.saccades
+          ? {
+              create: data.gaze.saccades.map((saccade) => ({
+                timestamp: BigInt(saccade.timestamp),
+                fromX: saccade.fromX,
+                fromY: saccade.fromY,
+                toX: saccade.toX,
+                toY: saccade.toY,
+                velocityPxPerSec: saccade.velocityPxPerSec,
+                amplitudePx: saccade.amplitudePx,
+                durationMs: saccade.durationMs,
+              })),
+            }
+          : undefined,
+
+        // Create reading patterns if provided
+        readingPatterns: data.gaze?.readingPatterns
+          ? {
+              create: data.gaze.readingPatterns.map((pattern) => ({
+                timestamp: BigInt(pattern.timestamp),
+                direction: pattern.direction,
+                speedWordsPerMin: pattern.speedWordsPerMin,
+                lineCount: pattern.lineCount,
+                regressionCount: pattern.regressionCount,
+              })),
+            }
+          : undefined,
+
+        // Create re-reading events if provided
+        rereadingEvents: data.gaze?.rereadingEvents
+          ? {
+              create: data.gaze.rereadingEvents.map((event) => ({
+                regionId: event.regionId,
+                visitCount: event.visitCount,
+                timestamps: JSON.stringify(event.timestamps),
+                totalDurationMs: event.totalDurationMs,
+              })),
+            }
+          : undefined,
+
+        // Create region focus data if provided
+        regionFocuses: data.gaze?.regionFocuses
+          ? {
+              create: data.gaze.regionFocuses.map((focus) => ({
+                regionId: focus.regionId,
+                regionLabel: focus.regionLabel,
+                x: focus.x,
+                y: focus.y,
+                width: focus.width,
+                height: focus.height,
+                focusDurationMs: focus.focusDurationMs,
+                fixationCount: focus.fixationCount,
+                firstVisitTimestamp: BigInt(focus.firstVisitTimestamp),
+                lastVisitTimestamp: BigInt(focus.lastVisitTimestamp),
               })),
             }
           : undefined,
@@ -238,6 +363,249 @@ router.get('/:userId/alerts', async (req, res) => {
     });
   } catch (error) {
     console.error('[API] Error fetching alerts:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+});
+
+/**
+ * GET /api/metrics/batch/:batchId/eye-tracking
+ * Get detailed eye tracking data for a specific batch
+ */
+router.get('/batch/:batchId/eye-tracking', async (req, res) => {
+  try {
+    const { batchId } = req.params;
+
+    const batch = await prisma.metricsBatch.findUnique({
+      where: { id: batchId },
+      include: {
+        gazeEvents: true,
+        fixationEvents: true,
+        saccadeEvents: true,
+        readingPatterns: true,
+        rereadingEvents: true,
+        regionFocuses: true,
+      },
+    });
+
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        error: 'Batch not found',
+      });
+    }
+
+    // Parse JSON fields in re-reading events
+    const rereadingEvents = batch.rereadingEvents.map((event) => ({
+      ...event,
+      timestamps: JSON.parse(event.timestamps),
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        batchId: batch.id,
+        userId: batch.userId,
+        startedAt: batch.startedAt,
+        endedAt: batch.endedAt,
+        url: batch.url,
+        domain: batch.domain,
+        gazeEvents: batch.gazeEvents,
+        fixationEvents: batch.fixationEvents,
+        saccadeEvents: batch.saccadeEvents,
+        readingPatterns: batch.readingPatterns,
+        rereadingEvents,
+        regionFocuses: batch.regionFocuses,
+      },
+    });
+  } catch (error) {
+    console.error('[API] Error fetching eye tracking data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+});
+
+/**
+ * GET /api/metrics/:userId/eye-tracking/analysis
+ * Get aggregated eye tracking analysis for a user over a date range
+ */
+router.get('/:userId/eye-tracking/analysis', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { startDate, endDate } = req.query;
+
+    const batches = await prisma.metricsBatch.findMany({
+      where: {
+        userId,
+        ...(startDate &&
+          endDate && {
+            startedAt: {
+              gte: new Date(startDate as string),
+              lte: new Date(endDate as string),
+            },
+          }),
+      },
+      include: {
+        fixationEvents: true,
+        saccadeEvents: true,
+        readingPatterns: true,
+        rereadingEvents: true,
+        regionFocuses: true,
+      },
+      orderBy: { startedAt: 'asc' },
+    });
+
+    // Aggregate statistics
+    const totalFixations = batches.reduce(
+      (sum, batch) => sum + batch.fixationEvents.length,
+      0
+    );
+    const totalSaccades = batches.reduce(
+      (sum, batch) => sum + batch.saccadeEvents.length,
+      0
+    );
+    const totalReadingPatterns = batches.reduce(
+      (sum, batch) => sum + batch.readingPatterns.length,
+      0
+    );
+
+    // Calculate average fixation duration
+    const allFixations = batches.flatMap((batch) => batch.fixationEvents);
+    const avgFixationDuration =
+      allFixations.length > 0
+        ? allFixations.reduce((sum, f) => sum + f.durationMs, 0) /
+          allFixations.length
+        : 0;
+
+    // Calculate average saccade velocity and amplitude
+    const allSaccades = batches.flatMap((batch) => batch.saccadeEvents);
+    const avgSaccadeVelocity =
+      allSaccades.length > 0
+        ? allSaccades.reduce((sum, s) => sum + s.velocityPxPerSec, 0) /
+          allSaccades.length
+        : 0;
+    const avgSaccadeAmplitude =
+      allSaccades.length > 0
+        ? allSaccades.reduce((sum, s) => sum + s.amplitudePx, 0) /
+          allSaccades.length
+        : 0;
+
+    // Reading pattern analysis
+    const allReadingPatterns = batches.flatMap((batch) => batch.readingPatterns);
+    const readingDirections = allReadingPatterns.reduce(
+      (acc, pattern) => {
+        acc[pattern.direction] = (acc[pattern.direction] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+
+    const avgReadingSpeed =
+      allReadingPatterns.filter((p) => p.speedWordsPerMin !== null).length > 0
+        ? allReadingPatterns
+            .filter((p) => p.speedWordsPerMin !== null)
+            .reduce((sum, p) => sum + (p.speedWordsPerMin || 0), 0) /
+          allReadingPatterns.filter((p) => p.speedWordsPerMin !== null).length
+        : 0;
+
+    // Region focus analysis
+    const allRegionFocuses = batches.flatMap((batch) => batch.regionFocuses);
+    const regionStats = allRegionFocuses.reduce(
+      (acc, focus) => {
+        if (!acc[focus.regionId]) {
+          acc[focus.regionId] = {
+            regionId: focus.regionId,
+            regionLabel: focus.regionLabel,
+            totalFocusDurationMs: 0,
+            totalFixations: 0,
+            occurrences: 0,
+          };
+        }
+        acc[focus.regionId].totalFocusDurationMs += focus.focusDurationMs;
+        acc[focus.regionId].totalFixations += focus.fixationCount;
+        acc[focus.regionId].occurrences += 1;
+        return acc;
+      },
+      {} as Record<
+        string,
+        {
+          regionId: string;
+          regionLabel: string | null;
+          totalFocusDurationMs: number;
+          totalFixations: number;
+          occurrences: number;
+        }
+      >
+    );
+
+    // Re-reading analysis
+    const allRereadingEvents = batches.flatMap((batch) => batch.rereadingEvents);
+    const rereadingStats = allRereadingEvents.reduce(
+      (acc, event) => {
+        if (!acc[event.regionId]) {
+          acc[event.regionId] = {
+            regionId: event.regionId,
+            totalVisits: 0,
+            totalDurationMs: 0,
+            occurrences: 0,
+          };
+        }
+        acc[event.regionId].totalVisits += event.visitCount;
+        acc[event.regionId].totalDurationMs += event.totalDurationMs;
+        acc[event.regionId].occurrences += 1;
+        return acc;
+      },
+      {} as Record<
+        string,
+        {
+          regionId: string;
+          totalVisits: number;
+          totalDurationMs: number;
+          occurrences: number;
+        }
+      >
+    );
+
+    res.json({
+      success: true,
+      data: {
+        dateRange: {
+          start: startDate || batches[0]?.startedAt,
+          end: endDate || batches[batches.length - 1]?.endedAt,
+        },
+        totalBatches: batches.length,
+        fixations: {
+          total: totalFixations,
+          avgDurationMs: avgFixationDuration,
+        },
+        saccades: {
+          total: totalSaccades,
+          avgVelocityPxPerSec: avgSaccadeVelocity,
+          avgAmplitudePx: avgSaccadeAmplitude,
+        },
+        readingPatterns: {
+          total: totalReadingPatterns,
+          directions: readingDirections,
+          avgSpeedWordsPerMin: avgReadingSpeed,
+        },
+        regionFocuses: Object.values(regionStats).map((stat) => ({
+          ...stat,
+          avgFocusDurationMs: stat.totalFocusDurationMs / stat.occurrences,
+          avgFixationsPerOccurrence: stat.totalFixations / stat.occurrences,
+        })),
+        rereadingEvents: Object.values(rereadingStats).map((stat) => ({
+          ...stat,
+          avgVisitsPerOccurrence: stat.totalVisits / stat.occurrences,
+          avgDurationMsPerOccurrence: stat.totalDurationMs / stat.occurrences,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error('[API] Error analyzing eye tracking data:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',

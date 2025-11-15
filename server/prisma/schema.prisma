@@ -64,7 +64,12 @@ model MetricsBatch {
   gazeMeanSaccadeLengthPx  Float?
 
   // Relations
-  gazeEvents GazeEvent[]
+  gazeEvents       GazeEvent[]
+  fixationEvents   FixationEvent[]
+  saccadeEvents    SaccadeEvent[]
+  readingPatterns  ReadingPattern[]
+  rereadingEvents  RereadingEvent[]
+  regionFocuses    RegionFocus[]
 
   @@index([userId, startedAt])
   @@index([domain])
@@ -81,6 +86,90 @@ model GazeEvent {
   y              Float
 
   @@index([batchId])
+}
+
+// Fixation events - when gaze remains on a region
+model FixationEvent {
+  id             String        @id @default(uuid())
+  batchId        String
+  batch          MetricsBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  timestamp      BigInt        // Unix timestamp when fixation started
+  x              Float         // Fixation center X coordinate
+  y              Float         // Fixation center Y coordinate
+  durationMs     Float         // How long the fixation lasted
+  regionId       String?       // Optional screen region identifier
+
+  @@index([batchId])
+}
+
+// Saccade events - rapid eye movements between fixations
+model SaccadeEvent {
+  id             String        @id @default(uuid())
+  batchId        String
+  batch          MetricsBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  timestamp      BigInt        // Unix timestamp when saccade started
+  fromX          Float         // Starting X coordinate
+  fromY          Float         // Starting Y coordinate
+  toX            Float         // Ending X coordinate
+  toY            Float         // Ending Y coordinate
+  velocityPxPerSec Float       // Saccade velocity
+  amplitudePx    Float         // Euclidean distance traveled
+  durationMs     Float         // Saccade duration
+
+  @@index([batchId])
+}
+
+// Reading pattern metrics for text-heavy interactions
+model ReadingPattern {
+  id             String        @id @default(uuid())
+  batchId        String
+  batch          MetricsBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  timestamp      BigInt        // Unix timestamp when pattern detected
+  direction      String        // 'left-to-right', 'right-to-left', 'top-to-bottom', 'irregular'
+  speedWordsPerMin Float?      // Estimated reading speed
+  lineCount      Int           // Number of lines traversed
+  regressionCount Int          // Number of backward saccades (re-reading)
+
+  @@index([batchId])
+}
+
+// Re-reading events - when user revisits same screen region
+model RereadingEvent {
+  id             String        @id @default(uuid())
+  batchId        String
+  batch          MetricsBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  regionId       String        // Screen region identifier (e.g., "top-left-quadrant")
+  visitCount     Int           // Number of times this region was revisited
+  timestamps     String        // JSON array of visit timestamps
+  totalDurationMs Float        // Total time spent in this region across all visits
+
+  @@index([batchId])
+  @@index([regionId])
+}
+
+// Focus duration per screen region
+model RegionFocus {
+  id             String        @id @default(uuid())
+  batchId        String
+  batch          MetricsBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  regionId       String        // Screen region identifier
+  regionLabel    String?       // Human-readable label (e.g., "navigation", "content", "sidebar")
+  x              Float         // Region center X
+  y              Float         // Region center Y
+  width          Float         // Region width
+  height         Float         // Region height
+  focusDurationMs Float        // Total focus time in this region
+  fixationCount  Int           // Number of fixations in this region
+  firstVisitTimestamp BigInt   // When region was first viewed
+  lastVisitTimestamp  BigInt   // When region was last viewed
+
+  @@index([batchId])
+  @@index([regionId])
 }
 
 // Daily summary per user

@@ -199,10 +199,15 @@
             </div>
         </div>
 
-        <!-- Realtime Data -->
+        <!-- Eye Tracking Calibration -->
         <div class="card">
-            <h2>📊 Latest Batch Data</h2>
-            <pre id="batch-data" style="background: #f5f5f5; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 12px;">Waiting for data...</pre>
+            <h2>🎯 Eye Tracking Calibration</h2>
+            <p style="margin-bottom: 10px; color: #666;">
+                <strong>Important:</strong> Start eye tracking first, then calibrate.<br>
+                Click each red dot 5 times while looking directly at it.
+            </p>
+            <button id="calibrate-eyes" class="btn">Calibrate Eyes (9 Points)</button>
+            <div id="calibration-status" style="margin-top: 10px; color: #667eea; font-weight: 500;"></div>
         </div>
     </div>
 
@@ -217,10 +222,31 @@
             totalBackspaces: 0,
             totalBatches: 0,
             lastBatch: null,
-            gazePoints: []
+            gazePoints: [],
+            gazeAnalytics: {
+                fixations: [],
+                saccades: [],
+                readingPatterns: [],
+                rereadingEvents: [],
+                regionFocusDurations: {}
+            }
         };
 
         let gazeTracking = false;
+        let gazeAnalysisInterval = null;
+
+        // Gaze Analytics Configuration
+        const GAZE_CONFIG = {
+            fixationRadiusPx: 50,           // Maximum distance for points to be in same fixation
+            fixationMinDurationMs: 100,     // Minimum time to be considered a fixation
+            saccadeMinDistancePx: 100,      // Minimum distance to be considered a saccade
+            readingLineHeightPx: 40,        // Vertical tolerance for same reading line
+            readingMinHorizontalDistancePx: 50, // Minimum horizontal movement for reading
+            rereadingVerticalTolerancePx: 50,   // Vertical tolerance for detecting re-reading
+            screenRegionRows: 4,            // Divide screen into grid (rows)
+            screenRegionCols: 4,            // Divide screen into grid (cols)
+            analysisIntervalMs: 1000        // How often to analyze gaze data
+        };
 
         // Initialize
         async function init() {
@@ -282,8 +308,7 @@
             // Batches
             document.getElementById('metric-batches').textContent = liveMetrics.totalBatches;
 
-            // Show batch data
-            document.getElementById('batch-data').textContent = JSON.stringify(batch, null, 2);
+            // Batch data display removed - not needed
         }
 
         async function updateTrackingStatus() {
@@ -298,6 +323,457 @@
                 statusBadge.className = 'status-badge inactive';
             }
         }
+
+        // ==========================================
+        // GAZE ANALYTICS ALGORITHMS
+        // ==========================================
+
+        /**
+         * Calculate Euclidean distance between two points
+         */
+        function calculateDistance(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        /**
+         * Detect fixations: periods where gaze stays within a small radius
+         * Returns array of fixation objects with centroid, duration, and gaze points
+         */
+        function detectFixations(gazePoints) {
+            if (gazePoints.length === 0) return [];
+
+            const fixations = [];
+            let currentFixation = {
+                points: [gazePoints[0]],
+                startTime: gazePoints[0].timestamp,
+                endTime: gazePoints[0].timestamp
+            };
+
+            for (let i = 1; i < gazePoints.length; i++) {
+                const point = gazePoints[i];
+
+                // Calculate centroid of current fixation
+                const centroid = {
+                    x: currentFixation.points.reduce((sum, p) => sum + p.x, 0) / currentFixation.points.length,
+                    y: currentFixation.points.reduce((sum, p) => sum + p.y, 0) / currentFixation.points.length
+                };
+
+                // Check if point is within fixation radius
+                const distance = calculateDistance(centroid, point);
+
+                if (distance <= GAZE_CONFIG.fixationRadiusPx) {
+                    // Part of current fixation
+                    currentFixation.points.push(point);
+                    currentFixation.endTime = point.timestamp;
+                } else {
+                    // End current fixation and start new one
+                    const duration = currentFixation.endTime - currentFixation.startTime;
+
+                    if (duration >= GAZE_CONFIG.fixationMinDurationMs) {
+                        fixations.push({
+                            centroid: centroid,
+                            startTime: currentFixation.startTime,
+                            endTime: currentFixation.endTime,
+                            durationMs: duration,
+                            pointCount: currentFixation.points.length
+                        });
+                    }
+
+                    // Start new fixation
+                    currentFixation = {
+                        points: [point],
+                        startTime: point.timestamp,
+                        endTime: point.timestamp
+                    };
+                }
+            }
+
+            // Handle last fixation
+            const duration = currentFixation.endTime - currentFixation.startTime;
+            if (duration >= GAZE_CONFIG.fixationMinDurationMs) {
+                const centroid = {
+                    x: currentFixation.points.reduce((sum, p) => sum + p.x, 0) / currentFixation.points.length,
+                    y: currentFixation.points.reduce((sum, p) => sum + p.y, 0) / currentFixation.points.length
+                };
+                fixations.push({
+                    centroid: centroid,
+                    startTime: currentFixation.startTime,
+                    endTime: currentFixation.endTime,
+                    durationMs: duration,
+                    pointCount: currentFixation.points.length
+                });
+            }
+
+            return fixations;
+        }
+
+        /**
+         * Detect saccades: rapid eye movements between fixations
+         * Returns array of saccade objects with velocity, amplitude, and direction
+         */
+        function detectSaccades(fixations) {
+            if (fixations.length < 2) return [];
+
+            const saccades = [];
+
+            for (let i = 1; i < fixations.length; i++) {
+                const fromFixation = fixations[i - 1];
+                const toFixation = fixations[i];
+
+                const distance = calculateDistance(fromFixation.centroid, toFixation.centroid);
+
+                // Only consider movements above threshold
+                if (distance >= GAZE_CONFIG.saccadeMinDistancePx) {
+                    const timeDelta = toFixation.startTime - fromFixation.endTime;
+                    const velocity = timeDelta > 0 ? distance / timeDelta : 0; // px/ms
+
+                    // Calculate direction (angle in degrees)
+                    const dx = toFixation.centroid.x - fromFixation.centroid.x;
+                    const dy = toFixation.centroid.y - fromFixation.centroid.y;
+                    const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+                    saccades.push({
+                        fromFixation: i - 1,
+                        toFixation: i,
+                        startPoint: fromFixation.centroid,
+                        endPoint: toFixation.centroid,
+                        amplitudePx: distance,
+                        velocityPxPerMs: velocity,
+                        durationMs: timeDelta,
+                        angleDegrees: angle
+                    });
+                }
+            }
+
+            return saccades;
+        }
+
+        /**
+         * Detect reading patterns: left-to-right horizontal movements
+         * Returns array of reading sequences
+         */
+        function detectReadingPatterns(fixations) {
+            if (fixations.length < 3) return [];
+
+            const readingSequences = [];
+            let currentSequence = [];
+
+            for (let i = 1; i < fixations.length; i++) {
+                const prevFixation = fixations[i - 1];
+                const currFixation = fixations[i];
+
+                const dx = currFixation.centroid.x - prevFixation.centroid.x;
+                const dy = Math.abs(currFixation.centroid.y - prevFixation.centroid.y);
+
+                // Check if movement is primarily horizontal (left-to-right) on same line
+                const isHorizontalMovement = dx > GAZE_CONFIG.readingMinHorizontalDistancePx;
+                const isSameLine = dy < GAZE_CONFIG.readingLineHeightPx;
+
+                if (isHorizontalMovement && isSameLine) {
+                    // Part of reading pattern
+                    if (currentSequence.length === 0) {
+                        currentSequence.push(i - 1); // Add previous fixation
+                    }
+                    currentSequence.push(i);
+                } else {
+                    // End current reading sequence
+                    if (currentSequence.length >= 3) {
+                        const startFixation = fixations[currentSequence[0]];
+                        const endFixation = fixations[currentSequence[currentSequence.length - 1]];
+
+                        readingSequences.push({
+                            fixationIndices: currentSequence,
+                            startTime: startFixation.startTime,
+                            endTime: endFixation.endTime,
+                            durationMs: endFixation.endTime - startFixation.startTime,
+                            fixationCount: currentSequence.length,
+                            averageY: currentSequence.reduce((sum, idx) => sum + fixations[idx].centroid.y, 0) / currentSequence.length
+                        });
+                    }
+                    currentSequence = [];
+                }
+            }
+
+            // Handle last sequence
+            if (currentSequence.length >= 3) {
+                const startFixation = fixations[currentSequence[0]];
+                const endFixation = fixations[currentSequence[currentSequence.length - 1]];
+
+                readingSequences.push({
+                    fixationIndices: currentSequence,
+                    startTime: startFixation.startTime,
+                    endTime: endFixation.endTime,
+                    durationMs: endFixation.endTime - startFixation.startTime,
+                    fixationCount: currentSequence.length,
+                    averageY: currentSequence.reduce((sum, idx) => sum + fixations[idx].centroid.y, 0) / currentSequence.length
+                });
+            }
+
+            return readingSequences;
+        }
+
+        /**
+         * Detect re-reading: returning to previously viewed areas
+         * Returns array of re-reading events
+         */
+        function detectRereading(fixations, readingPatterns) {
+            if (readingPatterns.length < 2) return [];
+
+            const rereadingEvents = [];
+
+            for (let i = 1; i < readingPatterns.length; i++) {
+                const currentPattern = readingPatterns[i];
+
+                // Check if current pattern overlaps vertically with previous patterns
+                for (let j = 0; j < i; j++) {
+                    const previousPattern = readingPatterns[j];
+
+                    const verticalDistance = Math.abs(currentPattern.averageY - previousPattern.averageY);
+
+                    if (verticalDistance < GAZE_CONFIG.rereadingVerticalTolerancePx) {
+                        rereadingEvents.push({
+                            currentPatternIndex: i,
+                            previousPatternIndex: j,
+                            verticalDistancePx: verticalDistance,
+                            timeBetweenMs: currentPattern.startTime - previousPattern.endTime,
+                            currentY: currentPattern.averageY,
+                            previousY: previousPattern.averageY
+                        });
+                    }
+                }
+            }
+
+            return rereadingEvents;
+        }
+
+        /**
+         * Calculate focus duration per screen region
+         * Divides screen into grid and calculates total fixation time per region
+         */
+        function calculateRegionFocusDurations(fixations) {
+            const screenWidth = window.innerWidth;
+            const screenHeight = window.innerHeight;
+            const regionWidth = screenWidth / GAZE_CONFIG.screenRegionCols;
+            const regionHeight = screenHeight / GAZE_CONFIG.screenRegionRows;
+
+            const regionDurations = {};
+
+            for (const fixation of fixations) {
+                const row = Math.floor(fixation.centroid.y / regionHeight);
+                const col = Math.floor(fixation.centroid.x / regionWidth);
+
+                // Ensure within bounds
+                const boundedRow = Math.max(0, Math.min(row, GAZE_CONFIG.screenRegionRows - 1));
+                const boundedCol = Math.max(0, Math.min(col, GAZE_CONFIG.screenRegionCols - 1));
+
+                const regionKey = `R${boundedRow}C${boundedCol}`;
+
+                if (!regionDurations[regionKey]) {
+                    regionDurations[regionKey] = {
+                        row: boundedRow,
+                        col: boundedCol,
+                        totalDurationMs: 0,
+                        fixationCount: 0
+                    };
+                }
+
+                regionDurations[regionKey].totalDurationMs += fixation.durationMs;
+                regionDurations[regionKey].fixationCount += 1;
+            }
+
+            return regionDurations;
+        }
+
+        /**
+         * Compute comprehensive gaze analytics
+         */
+        function computeGazeAnalytics() {
+            if (liveMetrics.gazePoints.length === 0) return null;
+
+            console.log(`[GazeAnalytics] Analyzing ${liveMetrics.gazePoints.length} gaze points...`);
+
+            // Detect fixations
+            const fixations = detectFixations(liveMetrics.gazePoints);
+            console.log(`[GazeAnalytics] Detected ${fixations.length} fixations`);
+
+            // Detect saccades
+            const saccades = detectSaccades(fixations);
+            console.log(`[GazeAnalytics] Detected ${saccades.length} saccades`);
+
+            // Detect reading patterns
+            const readingPatterns = detectReadingPatterns(fixations);
+            console.log(`[GazeAnalytics] Detected ${readingPatterns.length} reading patterns`);
+
+            // Detect re-reading
+            const rereadingEvents = detectRereading(fixations, readingPatterns);
+            console.log(`[GazeAnalytics] Detected ${rereadingEvents.length} re-reading events`);
+
+            // Calculate region focus durations
+            const regionFocusDurations = calculateRegionFocusDurations(fixations);
+            console.log(`[GazeAnalytics] Calculated focus durations for ${Object.keys(regionFocusDurations).length} regions`);
+
+            // Store in analytics
+            liveMetrics.gazeAnalytics = {
+                fixations,
+                saccades,
+                readingPatterns,
+                rereadingEvents,
+                regionFocusDurations
+            };
+
+            // Compute summary statistics
+            const totalFixationTime = fixations.reduce((sum, f) => sum + f.durationMs, 0);
+            const avgFixationDuration = fixations.length > 0 ? totalFixationTime / fixations.length : 0;
+            const avgSaccadeAmplitude = saccades.length > 0
+                ? saccades.reduce((sum, s) => sum + s.amplitudePx, 0) / saccades.length
+                : 0;
+            const avgSaccadeVelocity = saccades.length > 0
+                ? saccades.reduce((sum, s) => sum + s.velocityPxPerMs, 0) / saccades.length
+                : 0;
+
+            return {
+                rawGazePointCount: liveMetrics.gazePoints.length,
+                fixationCount: fixations.length,
+                totalFixationTimeMs: totalFixationTime,
+                avgFixationDurationMs: avgFixationDuration,
+                saccadeCount: saccades.length,
+                avgSaccadeAmplitudePx: avgSaccadeAmplitude,
+                avgSaccadeVelocityPxPerMs: avgSaccadeVelocity,
+                readingPatternCount: readingPatterns.length,
+                rereadingEventCount: rereadingEvents.length,
+                fixations: fixations,
+                saccades: saccades,
+                readingPatterns: readingPatterns,
+                rereadingEvents: rereadingEvents,
+                regionFocusDurations: regionFocusDurations
+            };
+        }
+
+        /**
+         * Periodically analyze gaze data and send with batch
+         */
+        function startGazeAnalysis() {
+            gazeAnalysisInterval = setInterval(() => {
+                const gazeAnalytics = computeGazeAnalytics();
+
+                if (gazeAnalytics) {
+                    console.log('[GazeAnalytics] Summary:', {
+                        fixations: gazeAnalytics.fixationCount,
+                        saccades: gazeAnalytics.saccadeCount,
+                        readingPatterns: gazeAnalytics.readingPatternCount,
+                        rereading: gazeAnalytics.rereadingEventCount
+                    });
+
+                    // Send gaze analytics to main process for inclusion in next batch
+                    ipcRenderer.send('gaze-analytics', gazeAnalytics);
+                }
+            }, GAZE_CONFIG.analysisIntervalMs);
+        }
+
+        function stopGazeAnalysis() {
+            if (gazeAnalysisInterval) {
+                clearInterval(gazeAnalysisInterval);
+                gazeAnalysisInterval = null;
+            }
+        }
+
+        // ==========================================
+        // EYE TRACKING CONTROLS
+        // ==========================================
+
+        // Eye Tracking Calibration
+        document.getElementById('calibrate-eyes').addEventListener('click', async () => {
+            if (!gazeTracking) {
+                alert('Please start eye tracking first!');
+                return;
+            }
+
+            const statusEl = document.getElementById('calibration-status');
+            statusEl.textContent = 'Starting calibration... Look at each dot and click it!';
+
+            // Clear existing calibration data
+            webgazer.clearData();
+
+            // 9-point calibration grid
+            const points = [
+                { x: 0.1, y: 0.1 },  // Top-left
+                { x: 0.5, y: 0.1 },  // Top-center
+                { x: 0.9, y: 0.1 },  // Top-right
+                { x: 0.1, y: 0.5 },  // Middle-left
+                { x: 0.5, y: 0.5 },  // Center
+                { x: 0.9, y: 0.5 },  // Middle-right
+                { x: 0.1, y: 0.9 },  // Bottom-left
+                { x: 0.5, y: 0.9 },  // Bottom-center
+                { x: 0.9, y: 0.9 }   // Bottom-right
+            ];
+
+            for (let i = 0; i < points.length; i++) {
+                const screenX = window.innerWidth * points[i].x;
+                const screenY = window.innerHeight * points[i].y;
+
+                statusEl.textContent = `Point ${i + 1}/9 - Stare at the pulsing dot and click it 3 times`;
+
+                // Create calibration point
+                const point = document.createElement('div');
+                point.style.position = 'fixed';
+                point.style.width = '40px';
+                point.style.height = '40px';
+                point.style.borderRadius = '50%';
+                point.style.background = 'radial-gradient(circle, #ff0000, #cc0000)';
+                point.style.left = screenX + 'px';
+                point.style.top = screenY + 'px';
+                point.style.transform = 'translate(-50%, -50%)';
+                point.style.cursor = 'pointer';
+                point.style.zIndex = '10000';
+                point.style.boxShadow = '0 0 30px rgba(255, 0, 0, 1)';
+                point.style.animation = 'pulse 1s infinite';
+                document.body.appendChild(point);
+
+                // Add pulsing animation if not exists
+                if (!document.getElementById('calibration-style')) {
+                    const style = document.createElement('style');
+                    style.id = 'calibration-style';
+                    style.textContent = `
+                        @keyframes pulse {
+                            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+                            50% { transform: translate(-50%, -50%) scale(1.3); opacity: 0.7; }
+                        }
+                    `;
+                    document.head.appendChild(style);
+                }
+
+                // Wait for 3 clicks at this position
+                await new Promise(resolve => {
+                    let clickCount = 0;
+                    const clickHandler = async (e) => {
+                        clickCount++;
+                        point.style.background = `radial-gradient(circle, #00ff00, #00cc00)`;
+
+                        // Give WebGazer time to record the click
+                        await new Promise(r => setTimeout(r, 300));
+
+                        if (clickCount >= 3) {
+                            point.removeEventListener('click', clickHandler);
+                            resolve();
+                        } else {
+                            point.style.background = `radial-gradient(circle, #ff0000, #cc0000)`;
+                        }
+                    };
+                    point.addEventListener('click', clickHandler);
+                });
+
+                // Remove point
+                document.body.removeChild(point);
+                await new Promise(resolve => setTimeout(resolve, 800));
+            }
+
+            statusEl.textContent = '✓ Calibration complete! Eye tracking is now trained for your eyes.';
+            setTimeout(() => {
+                statusEl.textContent = '';
+            }, 5000);
+        });
 
         // Eye Tracking with WebGazer
         document.getElementById('start-gaze').addEventListener('click', async () => {
@@ -329,6 +805,10 @@
                 document.getElementById('stop-gaze').style.display = 'inline-block';
 
                 gazeTracking = true;
+
+                // Start periodic gaze analysis
+                startGazeAnalysis();
+
                 console.log('[WebGazer] Started successfully!');
             } catch (error) {
                 console.error('[WebGazer] Error:', error);
@@ -340,7 +820,10 @@
             webgazer.end();
             document.getElementById('start-gaze').style.display = 'inline-block';
             document.getElementById('stop-gaze').style.display = 'none';
+
             gazeTracking = false;
+            stopGazeAnalysis();
+
             console.log('[WebGazer] Stopped');
         });
 
@@ -354,6 +837,69 @@
             dot.style.left = x + 'px';
             dot.style.top = y + 'px';
         }
+
+        // ==========================================
+        // NAVIGATION TRACKING (Google in Google detection)
+        // ==========================================
+
+        let searchHistory = [];
+        let lastSearchQuery = '';
+
+        // Track URL changes and search queries
+        setInterval(() => {
+            const currentUrl = window.location.href;
+            let searchQuery = '';
+
+            // Check if on Google search
+            if (currentUrl.includes('google.com')) {
+                // Extract search query from URL
+                const urlParams = new URLSearchParams(window.location.search);
+                searchQuery = urlParams.get('q') || '';
+
+                if (searchQuery && searchQuery !== lastSearchQuery) {
+                    lastSearchQuery = searchQuery;
+
+                    // Add to history
+                    searchHistory.push({
+                        query: searchQuery.toLowerCase(),
+                        timestamp: Date.now()
+                    });
+
+                    // Keep only last 10 searches
+                    if (searchHistory.length > 10) {
+                        searchHistory.shift();
+                    }
+
+                    // Check for repeated searches (same query within 5 minutes)
+                    const recentSearches = searchHistory.filter(s =>
+                        Date.now() - s.timestamp < 5 * 60 * 1000
+                    );
+                    const queryCounts = {};
+                    recentSearches.forEach(s => {
+                        queryCounts[s.query] = (queryCounts[s.query] || 0) + 1;
+                    });
+
+                    // If searched same thing 3+ times, it's confusion
+                    Object.entries(queryCounts).forEach(([query, count]) => {
+                        if (count >= 3) {
+                            console.log(`[Navigation Alert] Searched "${query}" ${count} times - possible confusion`);
+                            ipcRenderer.send('navigation-update', {
+                                url: currentUrl,
+                                searchQuery: query,
+                                repeatCount: count,
+                                type: 'REPEATED_SEARCH'
+                            });
+                        }
+                    });
+
+                    // Send for Google in Google detection
+                    ipcRenderer.send('navigation-update', {
+                        url: currentUrl,
+                        searchQuery: searchQuery
+                    });
+                }
+            }
+        }, 2000); // Check every 2 seconds
 
         // Initialize on load
         window.addEventListener('DOMContentLoaded', init);
