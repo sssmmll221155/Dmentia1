@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognitive Tracker Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .header {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .status.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .status.inactive {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .content-area {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 400px;
+        }
+
+        .typing-area {
+            width: 100%;
+            min-height: 200px;
+            padding: 15px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+        }
+
+        .typing-area:focus {
+            border-color: #4CAF50;
+            outline: none;
+        }
+
+        .metrics-panel {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .metric-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .metric-value {
+            color: #333;
+            font-family: monospace;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        button.stop {
+            background-color: #f44336;
+        }
+
+        button.stop:hover {
+            background-color: #da190b;
+        }
+
+        .controls {
+            margin-top: 20px;
+        }
+
+        .info-box {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+
+        .info-box h3 {
+            margin-top: 0;
+            color: #1976D2;
+        }
+
+        .task-section {
+            margin: 30px 0;
+        }
+
+        .task-section h2 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+
+        #consent-banner {
+            background-color: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        #consent-banner h3 {
+            margin-top: 0;
+            color: #856404;
+        }
+
+        #consent-banner button {
+            background-color: #ffc107;
+            color: #000;
+        }
+
+        #consent-banner button:hover {
+            background-color: #e0a800;
+        }
+    </style>
+</head>
+<body>
+    <div id="consent-banner">
+        <h3>Privacy Notice</h3>
+        <p>
+            This demo will track your keyboard, mouse, and eye movements for cognitive monitoring purposes.
+            <strong>No actual text content is recorded</strong> - only timing patterns, movement speed, and gaze coordinates.
+        </p>
+        <p>
+            Eye tracking requires webcam access but <strong>no video is sent to any server</strong> -
+            all processing happens in your browser.
+        </p>
+        <button onclick="giveConsent()">I Understand - Start Tracking</button>
+    </div>
+
+    <div class="header">
+        <h1>Cognitive Tracker Demo</h1>
+        <p>Multi-modal behavioral tracking system</p>
+        <div>
+            Tracking Status: <span class="status inactive" id="tracking-status">Inactive</span>
+        </div>
+    </div>
+
+    <div class="info-box">
+        <h3>How It Works</h3>
+        <p>
+            This system passively monitors your interactions to detect patterns that may indicate
+            cognitive changes. It tracks:
+        </p>
+        <ul>
+            <li><strong>Keystroke Dynamics:</strong> Typing rhythm, speed, error rate</li>
+            <li><strong>Mouse Movement:</strong> Speed, precision, hesitation patterns</li>
+            <li><strong>Eye Tracking:</strong> Gaze patterns, fixation duration, attention</li>
+        </ul>
+        <p>
+            Try the tasks below to generate sample data. Metrics are batched every 10 seconds and sent to the backend.
+        </p>
+    </div>
+
+    <div class="task-section">
+        <h2>Task 1: Free Typing</h2>
+        <p>Type anything you like in the box below. This generates keystroke timing data.</p>
+        <textarea class="typing-area" id="typing-area" placeholder="Start typing here..."></textarea>
+    </div>
+
+    <div class="task-section">
+        <h2>Task 2: Reading & Scrolling</h2>
+        <div class="content-area">
+            <h3>Sample Article: The Nature of Memory</h3>
+            <p>
+                Memory is not a perfect recording of our experiences but rather a reconstructive process.
+                When we recall an event, our brain doesn't simply replay a stored video; instead, it
+                pieces together fragments of information from various sources.
+            </p>
+            <p>
+                Research has shown that memories are malleable and can be influenced by suggestion,
+                emotion, and the passage of time. This phenomenon, known as memory reconsolidation,
+                occurs each time we recall a memory, potentially altering it in subtle ways.
+            </p>
+            <p>
+                The hippocampus plays a crucial role in forming new memories and consolidating them
+                into long-term storage. However, once memories are established, they can become
+                independent of the hippocampus and distributed across the cortex.
+            </p>
+            <p>
+                Studies of patients with amnesia have revealed that there are different types of memory
+                systems in the brain. Declarative memory (facts and events) is distinct from procedural
+                memory (skills and habits), and damage to one system doesn't necessarily affect the other.
+            </p>
+            <p>
+                Recent advances in neuroscience have allowed researchers to observe memory formation
+                at the cellular level. They've discovered that learning strengthens connections between
+                neurons through a process called long-term potentiation, which is thought to be the
+                biological basis of memory storage.
+            </p>
+            <p>
+                Understanding how memory works is not just academically interesting—it has practical
+                applications for treating memory disorders, improving learning strategies, and even
+                developing new technologies for augmenting human cognition.
+            </p>
+        </div>
+    </div>
+
+    <div class="metrics-panel">
+        <h2>Live Metrics</h2>
+        <div id="metrics-display">
+            <div class="metric-row">
+                <span class="metric-label">Total Key Presses:</span>
+                <span class="metric-value" id="metric-keypresses">0</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Typing Speed:</span>
+                <span class="metric-value" id="metric-typing-speed">0 keys/sec</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Error Rate:</span>
+                <span class="metric-value" id="metric-error-rate">0%</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Mouse Movement:</span>
+                <span class="metric-value" id="metric-mouse-distance">0 px</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Gaze Fixations:</span>
+                <span class="metric-value" id="metric-gaze-fixations">N/A</span>
+            </div>
+            <div class="metric-row">
+                <span class="metric-label">Batches Sent:</span>
+                <span class="metric-value" id="metric-batches-sent">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button onclick="stopTracking()" class="stop">Stop Tracking</button>
+        <button onclick="viewDashboard()">View Dashboard</button>
+    </div>
+
+    <!-- Load WebGazer -->
+    <script src="../WebGazer/www/webgazer.js"></script>
+
+    <!-- Load Unified Tracker (compiled from TypeScript) -->
+    <script src="../integration/dist/unified-tracker.js"></script>
+
+    <script>
+        let tracker = null;
+        let totalBatchesSent = 0;
+
+        async function giveConsent() {
+            document.getElementById('consent-banner').style.display = 'none';
+            await startTracking();
+        }
+
+        async function startTracking() {
+            const userId = 'demo-user-' + Date.now(); // In production, use real user ID
+
+            // Initialize unified tracker
+            // Note: This assumes the TypeScript has been compiled to a global UMD module
+            // In practice, you might use a bundler like webpack
+
+            console.log('[Demo] Starting cognitive tracking...');
+
+            // For demo purposes, we'll initialize WebGazer separately
+            // and manually track events. In production, use the UnifiedCognitiveTracker class.
+
+            try {
+                await webgazer.setRegression('ridge')
+                    .setGazeListener((data, clock) => {
+                        if (data) {
+                            updateGazeMetrics(data);
+                        }
+                    })
+                    .saveDataAcrossSessions(false)
+                    .begin();
+
+                webgazer.showVideoPreview(false)
+                    .showPredictionPoints(false)
+                    .applyKalmanFilter(true);
+
+                document.getElementById('tracking-status').textContent = 'Active';
+                document.getElementById('tracking-status').className = 'status active';
+
+                console.log('[Demo] Tracking started');
+
+                // Start monitoring events for demo metrics
+                startMetricsMonitoring();
+
+            } catch (error) {
+                console.error('[Demo] Error starting tracking:', error);
+                alert('Failed to start tracking. Please ensure you granted webcam access.');
+            }
+        }
+
+        async function stopTracking() {
+            if (webgazer) {
+                await webgazer.end();
+            }
+
+            document.getElementById('tracking-status').textContent = 'Inactive';
+            document.getElementById('tracking-status').className = 'status inactive';
+
+            console.log('[Demo] Tracking stopped');
+        }
+
+        // Demo metrics monitoring
+        let keyPressCount = 0;
+        let backspaceCount = 0;
+        let mouseDistance = 0;
+        let gazeFixationCount = 0;
+
+        function startMetricsMonitoring() {
+            document.addEventListener('keydown', (e) => {
+                keyPressCount++;
+                if (e.key === 'Backspace') backspaceCount++;
+                updateMetricsDisplay();
+            });
+
+            let lastMouseX = 0;
+            let lastMouseY = 0;
+            document.addEventListener('mousemove', (e) => {
+                if (lastMouseX > 0) {
+                    const dx = e.clientX - lastMouseX;
+                    const dy = e.clientY - lastMouseY;
+                    mouseDistance += Math.sqrt(dx * dx + dy * dy);
+                    updateMetricsDisplay();
+                }
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            // Simulate batch sending every 10 seconds
+            setInterval(() => {
+                if (keyPressCount > 0 || mouseDistance > 0) {
+                    totalBatchesSent++;
+                    console.log('[Demo] Batch sent to backend (simulated)');
+                    updateMetricsDisplay();
+                }
+            }, 10000);
+        }
+
+        function updateMetricsDisplay() {
+            document.getElementById('metric-keypresses').textContent = keyPressCount;
+
+            const typingSpeed = (keyPressCount / (Date.now() / 1000 - performance.now() / 1000)).toFixed(2);
+            document.getElementById('metric-typing-speed').textContent = typingSpeed + ' keys/sec';
+
+            const errorRate = keyPressCount > 0 ? ((backspaceCount / keyPressCount) * 100).toFixed(1) : 0;
+            document.getElementById('metric-error-rate').textContent = errorRate + '%';
+
+            document.getElementById('metric-mouse-distance').textContent = Math.round(mouseDistance) + ' px';
+
+            document.getElementById('metric-batches-sent').textContent = totalBatchesSent;
+        }
+
+        function updateGazeMetrics(gazeData) {
+            // Simple gaze tracking update
+            if (gazeData && gazeData.x && gazeData.y) {
+                gazeFixationCount++;
+                if (gazeFixationCount % 50 === 0) { // Update every 50 gaze points
+                    document.getElementById('metric-gaze-fixations').textContent =
+                        Math.floor(gazeFixationCount / 50) + ' fixations detected';
+                }
+            }
+        }
+
+        function viewDashboard() {
+            alert('Dashboard view would show:\n\n' +
+                  '• Daily trends in typing speed and accuracy\n' +
+                  '• Baseline comparison charts\n' +
+                  '• Deviation alerts\n' +
+                  '• Multi-modal correlation scores\n\n' +
+                  'This feature requires the backend API to be running.');
+        }
+
+        // Note: In production, replace this demo code with:
+        // import { createUnifiedTracker } from './integration/dist/index.js';
+        // const tracker = await createUnifiedTracker({
+        //     userId: 'actual-user-id',
+        //     apiBaseUrl: 'http://localhost:3000',
+        //     batchIntervalMs: 10000
+        // });
+    </script>
+</body>
+</html>

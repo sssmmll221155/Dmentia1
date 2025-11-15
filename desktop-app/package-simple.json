@@ -1,0 +1,17 @@
+{
+  "name": "cognitive-tracker-desktop",
+  "version": "1.0.0",
+  "description": "System-wide cognitive tracking desktop application",
+  "main": "src/main-simple.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "axios": "^1.6.2",
+    "node-machine-id": "^1.1.12"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0"
+  }
+}

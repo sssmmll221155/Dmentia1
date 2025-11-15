@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognitive Tracker - Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .status-badge.active {
+            background-color: #10b981;
+            color: white;
+        }
+
+        .status-badge.inactive {
+            background-color: #ef4444;
+            color: white;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            font-size: 18px;
+            color: #667eea;
+            margin-bottom: 16px;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            font-weight: 500;
+            color: #6b7280;
+        }
+
+        .metric-value {
+            font-weight: 700;
+            font-size: 18px;
+            color: #111827;
+        }
+
+        .metric-value.good {
+            color: #10b981;
+        }
+
+        .metric-value.warning {
+            color: #f59e0b;
+        }
+
+        .metric-value.danger {
+            color: #ef4444;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 16px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button.primary {
+            background-color: #667eea;
+            color: white;
+        }
+
+        button.primary:hover {
+            background-color: #5568d3;
+        }
+
+        button.secondary {
+            background-color: #e5e7eb;
+            color: #374151;
+        }
+
+        button.secondary:hover {
+            background-color: #d1d5db;
+        }
+
+        button.danger {
+            background-color: #ef4444;
+            color: white;
+        }
+
+        button.danger:hover {
+            background-color: #dc2626;
+        }
+
+        .alert {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert h3 {
+            color: #92400e;
+            margin-bottom: 8px;
+        }
+
+        .alert p {
+            color: #78350f;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Cognitive Tracker Dashboard</h1>
+            <p>System-wide behavioral monitoring</p>
+            <div style="margin-top: 16px;">
+                <span class="status-badge" id="tracking-status">Loading...</span>
+                <span style="margin-left: 16px; color: #6b7280;">User ID: <span id="user-id">Loading...</span></span>
+            </div>
+        </div>
+
+        <!-- Alerts Section -->
+        <div id="alerts-container"></div>
+
+        <!-- Real-time Metrics -->
+        <div class="grid">
+            <div class="card">
+                <h2>Keyboard Activity</h2>
+                <div class="metric">
+                    <span class="metric-label">Typing Speed</span>
+                    <span class="metric-value" id="metric-typing-speed">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Error Rate</span>
+                    <span class="metric-value" id="metric-error-rate">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Rhythm Consistency</span>
+                    <span class="metric-value" id="metric-rhythm">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Mouse Activity</h2>
+                <div class="metric">
+                    <span class="metric-label">Movement Speed</span>
+                    <span class="metric-value" id="metric-mouse-speed">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Precision</span>
+                    <span class="metric-value" id="metric-mouse-precision">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total Distance</span>
+                    <span class="metric-value" id="metric-mouse-distance">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Session Info</h2>
+                <div class="metric">
+                    <span class="metric-label">Active Time</span>
+                    <span class="metric-value" id="metric-active-time">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Batches Sent</span>
+                    <span class="metric-value" id="metric-batches">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Update</span>
+                    <span class="metric-value" id="metric-last-update">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid">
+            <div class="card">
+                <h2>Typing Speed (7 Days)</h2>
+                <div class="chart-container">
+                    <canvas id="typing-speed-chart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Error Rate Trend</h2>
+                <div class="chart-container">
+                    <canvas id="error-rate-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Multi-Modal Baseline Comparison</h2>
+            <div class="chart-container" style="height: 400px;">
+                <canvas id="baseline-comparison-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Test Typing Area -->
+        <div class="card">
+            <h2>✨ Try Typing Here!</h2>
+            <p style="color: #6b7280; margin-bottom: 16px;">Type in the box below to see keyboard metrics update in real-time (every 10 seconds)</p>
+            <textarea
+                id="test-typing-area"
+                class="typing-area"
+                placeholder="Start typing here to generate keyboard data... Try typing a sentence, make some mistakes with backspace, etc."
+                style="width: 100%; min-height: 150px; padding: 15px; font-size: 16px; border: 2px solid #667eea; border-radius: 8px; font-family: inherit;"
+            ></textarea>
+            <p style="color: #10b981; margin-top: 12px; font-size: 14px;" id="typing-feedback">👆 Your typing patterns are being analyzed!</p>
+        </div>
+
+        <!-- Controls -->
+        <div class="card">
+            <h2>Controls</h2>
+            <div class="controls">
+                <button class="primary" id="toggle-tracking">Toggle Tracking</button>
+                <button class="secondary" onclick="refreshData()">Refresh Data</button>
+                <button class="secondary" onclick="exportReport()">Export Report</button>
+                <button class="danger" onclick="clearData()">Clear Local Data</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        // Expose API for tracking
+        window.electronAPI = {
+            trackKeyboard: (data) => ipcRenderer.send('track-keyboard', data),
+            trackMouse: (data) => ipcRenderer.send('track-mouse', data),
+            trackScroll: (data) => ipcRenderer.send('track-scroll', data),
+        };
+
+        let charts = {};
+        let userId = null;
+        let apiBaseUrl = 'http://localhost:3000';
+
+        // Real-time metrics tracking
+        let liveMetrics = {
+            totalKeyPresses: 0,
+            totalBackspaces: 0,
+            totalMouseDistance: 0,
+            totalBatches: 0,
+            lastBatch: null
+        };
+
+        // Initialize dashboard
+        async function init() {
+            // Get config
+            const config = await ipcRenderer.invoke('get-config');
+            apiBaseUrl = config.apiBaseUrl;
+            userId = config.userId;
+
+            document.getElementById('user-id').textContent = userId.substring(0, 20) + '...';
+
+            // Update tracking status
+            updateTrackingStatus();
+
+            // Load data from backend
+            await loadDashboardData();
+
+            // Initialize charts
+            initializeCharts();
+
+            // Listen for real-time batch updates
+            ipcRenderer.on('batch-sent', (event, metrics) => {
+                handleBatchSent(metrics);
+            });
+
+            // Listen for tracking status changes
+            ipcRenderer.on('tracking-status-changed', (event, isTracking) => {
+                updateTrackingStatus();
+            });
+
+            // Set up auto-refresh
+            setInterval(updateTrackingStatus, 1000);
+            setInterval(loadDashboardData, 30000); // Every 30 seconds
+            setInterval(updateLiveMetricsDisplay, 1000); // Update display every second
+        }
+
+        function handleBatchSent(metrics) {
+            liveMetrics.totalBatches++;
+            liveMetrics.totalKeyPresses += metrics.keyboard.keyPressCount;
+            liveMetrics.totalBackspaces += metrics.keyboard.backspaceCount;
+            liveMetrics.totalMouseDistance += metrics.mouse.totalDistancePx;
+            liveMetrics.lastBatch = metrics;
+
+            updateLiveMetricsDisplay();
+        }
+
+        function updateLiveMetricsDisplay() {
+            if (!liveMetrics.lastBatch) return;
+
+            const batch = liveMetrics.lastBatch;
+
+            // Typing speed (keys per second over this batch)
+            const batchDuration = (new Date(batch.endedAt) - new Date(batch.startedAt)) / 1000;
+            const typingSpeed = batchDuration > 0
+                ? (batch.keyboard.keyPressCount / batchDuration).toFixed(2)
+                : 0;
+            document.getElementById('metric-typing-speed').innerHTML = `${typingSpeed} <small>keys/s</small>`;
+
+            // Error rate
+            const errorRate = batch.keyboard.keyPressCount > 0
+                ? ((batch.keyboard.backspaceCount / batch.keyboard.keyPressCount) * 100).toFixed(1)
+                : 0;
+            const errorEl = document.getElementById('metric-error-rate');
+            errorEl.innerHTML = `${errorRate}%`;
+            errorEl.className = 'metric-value ' + (errorRate < 5 ? 'good' : errorRate < 10 ? 'warning' : 'danger');
+
+            // Rhythm
+            const rhythm = batch.keyboard.stdInterKeyIntervalMs.toFixed(0);
+            document.getElementById('metric-rhythm').innerHTML = `${rhythm} <small>ms std</small>`;
+
+            // Mouse speed
+            const mouseSpeed = batch.mouse.meanSpeedPxPerSec.toFixed(0);
+            document.getElementById('metric-mouse-speed').innerHTML = `${mouseSpeed} <small>px/s</small>`;
+
+            // Mouse distance (cumulative)
+            document.getElementById('metric-mouse-distance').innerHTML =
+                `${Math.round(liveMetrics.totalMouseDistance)} <small>px</small>`;
+
+            // Active time (session duration)
+            const now = new Date();
+            const firstBatch = new Date(batch.startedAt);
+            const activeMinutes = Math.floor((now - firstBatch) / 60000);
+            document.getElementById('metric-active-time').innerHTML = `${activeMinutes}+ <small>min</small>`;
+
+            // Batches sent
+            document.getElementById('metric-batches').textContent = liveMetrics.totalBatches;
+
+            // Last update
+            document.getElementById('metric-last-update').textContent = now.toLocaleTimeString();
+        }
+
+        async function getUserId() {
+            const config = await ipcRenderer.invoke('get-config');
+            return config.userId;
+        }
+
+        async function updateTrackingStatus() {
+            const isTracking = await ipcRenderer.invoke('get-tracking-status');
+            const statusBadge = document.getElementById('tracking-status');
+
+            if (isTracking) {
+                statusBadge.textContent = 'Tracking Active';
+                statusBadge.className = 'status-badge active';
+            } else {
+                statusBadge.textContent = 'Tracking Paused';
+                statusBadge.className = 'status-badge inactive';
+            }
+        }
+
+        async function loadDashboardData() {
+            try {
+                // Fetch summaries from backend
+                const response = await fetch(`${apiBaseUrl}/api/metrics/${userId}/summary?limit=7`);
+                const data = await response.json();
+
+                if (data.success) {
+                    updateMetrics(data.summaries);
+                    updateCharts(data.summaries);
+                }
+
+                // Fetch alerts
+                const alertsResponse = await fetch(`${apiBaseUrl}/api/metrics/${userId}/alerts?status=new`);
+                const alertsData = await alertsResponse.json();
+
+                if (alertsData.success) {
+                    displayAlerts(alertsData.alerts);
+                }
+
+                // Update last update time
+                document.getElementById('metric-last-update').textContent = new Date().toLocaleTimeString();
+
+            } catch (error) {
+                console.error('Failed to load dashboard data:', error);
+            }
+        }
+
+        function updateMetrics(summaries) {
+            if (!summaries || summaries.length === 0) return;
+
+            const latest = summaries[0];
+
+            // Typing speed
+            const typingSpeed = latest.avgKeyboardKeyPressRate.toFixed(2);
+            document.getElementById('metric-typing-speed').innerHTML = `${typingSpeed} <small>keys/s</small>`;
+
+            // Error rate
+            const errorRate = (latest.avgKeyboardErrorRate * 100).toFixed(1);
+            const errorEl = document.getElementById('metric-error-rate');
+            errorEl.innerHTML = `${errorRate}%`;
+            errorEl.className = 'metric-value ' + (errorRate < 5 ? 'good' : errorRate < 10 ? 'warning' : 'danger');
+
+            // Rhythm
+            const rhythm = latest.keyboardInterKeyVariabilityMs.toFixed(0);
+            document.getElementById('metric-rhythm').innerHTML = `${rhythm} <small>ms std</small>`;
+
+            // Mouse speed
+            const mouseSpeed = latest.avgMouseSpeedPxPerSec.toFixed(0);
+            document.getElementById('metric-mouse-speed').innerHTML = `${mouseSpeed} <small>px/s</small>`;
+
+            // Active time
+            const activeMinutes = (latest.totalActiveSeconds / 60).toFixed(0);
+            document.getElementById('metric-active-time').innerHTML = `${activeMinutes} <small>min</small>`;
+
+            // Batches
+            document.getElementById('metric-batches').textContent = latest.totalBatches;
+        }
+
+        function displayAlerts(alerts) {
+            const container = document.getElementById('alerts-container');
+            container.innerHTML = '';
+
+            if (!alerts || alerts.length === 0) return;
+
+            alerts.forEach(alert => {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert';
+                alertDiv.innerHTML = `
+                    <h3>${alert.severity.toUpperCase()} Severity Alert - ${new Date(alert.date).toLocaleDateString()}</h3>
+                    <p>${alert.summary}</p>
+                    <p style="margin-top: 8px; font-size: 14px;">Correlation Score: ${(alert.correlationScore * 100).toFixed(0)}%</p>
+                `;
+                container.appendChild(alertDiv);
+            });
+        }
+
+        function initializeCharts() {
+            // Typing Speed Chart
+            const typingSpeedCtx = document.getElementById('typing-speed-chart').getContext('2d');
+            charts.typingSpeed = new Chart(typingSpeedCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Typing Speed (keys/sec)',
+                        data: [],
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+            // Error Rate Chart
+            const errorRateCtx = document.getElementById('error-rate-chart').getContext('2d');
+            charts.errorRate = new Chart(errorRateCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Error Rate (%)',
+                        data: [],
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+            // Baseline Comparison (Radar)
+            const baselineCtx = document.getElementById('baseline-comparison-chart').getContext('2d');
+            charts.baseline = new Chart(baselineCtx, {
+                type: 'radar',
+                data: {
+                    labels: ['Typing Speed', 'Error Rate', 'Rhythm', 'Mouse Speed', 'Precision'],
+                    datasets: [
+                        {
+                            label: 'Baseline',
+                            data: [100, 100, 100, 100, 100],
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.2)'
+                        },
+                        {
+                            label: 'Current',
+                            data: [95, 110, 90, 100, 95],
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.2)'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            beginAtZero: true,
+                            max: 150
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateCharts(summaries) {
+            if (!summaries || summaries.length === 0) return;
+
+            // Reverse to show oldest to newest
+            const reversed = summaries.slice().reverse();
+
+            // Update typing speed chart
+            charts.typingSpeed.data.labels = reversed.map(s => new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+            charts.typingSpeed.data.datasets[0].data = reversed.map(s => s.avgKeyboardKeyPressRate);
+            charts.typingSpeed.update();
+
+            // Update error rate chart
+            charts.errorRate.data.labels = reversed.map(s => new Date(s.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+            charts.errorRate.data.datasets[0].data = reversed.map(s => s.avgKeyboardErrorRate * 100);
+            charts.errorRate.update();
+        }
+
+        async function refreshData() {
+            await loadDashboardData();
+            alert('Data refreshed!');
+        }
+
+        function exportReport() {
+            alert('Export feature coming soon!');
+        }
+
+        function clearData() {
+            if (confirm('Are you sure you want to clear all local data?')) {
+                alert('Data cleared!');
+            }
+        }
+
+        // Toggle tracking button
+        document.getElementById('toggle-tracking').addEventListener('click', async () => {
+            const newStatus = await ipcRenderer.invoke('toggle-tracking');
+            updateTrackingStatus();
+        });
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

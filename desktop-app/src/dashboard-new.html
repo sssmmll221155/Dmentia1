@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cognitive Tracker - Live Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="webgazer.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 28px;
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .status-badge.active {
+            background-color: #10b981;
+            color: white;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            font-size: 14px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+
+        .metric-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .metric-value small {
+            font-size: 14px;
+            color: #999;
+        }
+
+        #gaze-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        .gaze-dot {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: rgba(255, 0, 0, 0.5);
+            border: 2px solid #ff0000;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        #webcam-container {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #webcam-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .button:hover {
+            background: #5568d3;
+        }
+
+        .button.danger {
+            background: #ef4444;
+        }
+
+        .button.danger:hover {
+            background: #dc2626;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1>🧠 Cognitive Tracker</h1>
+                <p style="color: #666; margin-top: 5px;">Real-Time Behavioral Monitoring</p>
+            </div>
+            <div>
+                <span id="tracking-status" class="status-badge active">Tracking Active</span>
+            </div>
+        </div>
+
+        <!-- Live Metrics Grid -->
+        <div class="grid">
+            <div class="card">
+                <h2>⌨️ Typing Speed</h2>
+                <div id="metric-typing-speed" class="metric-value">0 <small>keys/s</small></div>
+            </div>
+
+            <div class="card">
+                <h2>🖱️ Mouse Speed</h2>
+                <div id="metric-mouse-speed" class="metric-value">0 <small>px/s</small></div>
+            </div>
+
+            <div class="card">
+                <h2>❌ Error Rate</h2>
+                <div id="metric-error-rate" class="metric-value">0%</div>
+            </div>
+
+            <div class="card">
+                <h2>📦 Batches Sent</h2>
+                <div id="metric-batches" class="metric-value">0</div>
+            </div>
+        </div>
+
+        <!-- Eye Tracking Section -->
+        <div class="card" style="margin-bottom: 20px;">
+            <h2>👁️ Eye Tracking (WebGazer)</h2>
+            <div id="webcam-container">
+                <video id="webgazerVideoFeed" autoplay playsinline></video>
+            </div>
+            <div style="margin-top: 15px;">
+                <button id="start-gaze" class="button">Start Eye Tracking</button>
+                <button id="stop-gaze" class="button danger" style="display: none;">Stop Eye Tracking</button>
+                <p style="margin-top: 10px; color: #666; font-size: 14px;">
+                    Eye tracking uses your webcam to detect where you're looking on screen.
+                    Red dot shows gaze position. Click around to calibrate.
+                </p>
+            </div>
+        </div>
+
+        <!-- Realtime Data -->
+        <div class="card">
+            <h2>📊 Latest Batch Data</h2>
+            <pre id="batch-data" style="background: #f5f5f5; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 12px;">Waiting for data...</pre>
+        </div>
+    </div>
+
+    <!-- Gaze overlay -->
+    <div id="gaze-overlay"></div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        let liveMetrics = {
+            totalKeyPresses: 0,
+            totalBackspaces: 0,
+            totalBatches: 0,
+            lastBatch: null,
+            gazePoints: []
+        };
+
+        let gazeTracking = false;
+
+        // Initialize
+        async function init() {
+            console.log('[Dashboard] Initializing...');
+
+            // Get config
+            const config = await ipcRenderer.invoke('get-config');
+            console.log('[Dashboard] Config loaded:', config);
+
+            // Update tracking status
+            updateTrackingStatus();
+
+            // Listen for batch updates
+            ipcRenderer.on('batch-sent', (event, metrics) => {
+                console.log('[Dashboard] Batch received:', metrics);
+                handleBatchSent(metrics);
+            });
+
+            // Listen for tracking status changes
+            ipcRenderer.on('tracking-status-changed', (event, isTracking) => {
+                updateTrackingStatus();
+            });
+
+            console.log('[Dashboard] Ready!');
+        }
+
+        function handleBatchSent(metrics) {
+            liveMetrics.lastBatch = metrics;
+            liveMetrics.totalBatches++;
+            liveMetrics.totalKeyPresses += metrics.keyboard.keyPressCount;
+            liveMetrics.totalBackspaces += metrics.keyboard.backspaceCount;
+
+            updateLiveMetrics();
+        }
+
+        function updateLiveMetrics() {
+            const batch = liveMetrics.lastBatch;
+            if (!batch) return;
+
+            // Calculate duration
+            const start = new Date(batch.startedAt);
+            const end = new Date(batch.endedAt);
+            const durationSec = (end - start) / 1000;
+
+            // Typing speed (keys per second)
+            const typingSpeed = durationSec > 0 ? (batch.keyboard.keyPressCount / durationSec).toFixed(2) : 0;
+            document.getElementById('metric-typing-speed').innerHTML = `${typingSpeed} <small>keys/s</small>`;
+
+            // Mouse speed
+            const mouseSpeed = batch.mouse.meanSpeedPxPerSec.toFixed(0);
+            document.getElementById('metric-mouse-speed').innerHTML = `${mouseSpeed} <small>px/s</small>`;
+
+            // Error rate
+            const errorRate = batch.keyboard.keyPressCount > 0
+                ? ((batch.keyboard.backspaceCount / batch.keyboard.keyPressCount) * 100).toFixed(1)
+                : 0;
+            document.getElementById('metric-error-rate').innerHTML = `${errorRate}%`;
+
+            // Batches
+            document.getElementById('metric-batches').textContent = liveMetrics.totalBatches;
+
+            // Show batch data
+            document.getElementById('batch-data').textContent = JSON.stringify(batch, null, 2);
+        }
+
+        async function updateTrackingStatus() {
+            const isTracking = await ipcRenderer.invoke('get-tracking-status');
+            const statusBadge = document.getElementById('tracking-status');
+
+            if (isTracking) {
+                statusBadge.textContent = 'Tracking Active ✓';
+                statusBadge.className = 'status-badge active';
+            } else {
+                statusBadge.textContent = 'Tracking Paused';
+                statusBadge.className = 'status-badge inactive';
+            }
+        }
+
+        // Eye Tracking with WebGazer
+        document.getElementById('start-gaze').addEventListener('click', async () => {
+            try {
+                console.log('[WebGazer] Starting...');
+
+                await webgazer.setRegression('ridge')
+                    .setTracker('TFFacemesh')
+                    .setGazeListener((data, timestamp) => {
+                        if (data == null) return;
+
+                        // Update gaze dot
+                        updateGazeDot(data.x, data.y);
+
+                        // Store gaze point
+                        liveMetrics.gazePoints.push({
+                            x: data.x,
+                            y: data.y,
+                            timestamp: timestamp
+                        });
+                    })
+                    .begin();
+
+                webgazer.showVideoPreview(true)
+                    .showPredictionPoints(true)
+                    .applyKalmanFilter(true);
+
+                document.getElementById('start-gaze').style.display = 'none';
+                document.getElementById('stop-gaze').style.display = 'inline-block';
+
+                gazeTracking = true;
+                console.log('[WebGazer] Started successfully!');
+            } catch (error) {
+                console.error('[WebGazer] Error:', error);
+                alert('Failed to start eye tracking: ' + error.message);
+            }
+        });
+
+        document.getElementById('stop-gaze').addEventListener('click', () => {
+            webgazer.end();
+            document.getElementById('start-gaze').style.display = 'inline-block';
+            document.getElementById('stop-gaze').style.display = 'none';
+            gazeTracking = false;
+            console.log('[WebGazer] Stopped');
+        });
+
+        function updateGazeDot(x, y) {
+            let dot = document.querySelector('.gaze-dot');
+            if (!dot) {
+                dot = document.createElement('div');
+                dot.className = 'gaze-dot';
+                document.getElementById('gaze-overlay').appendChild(dot);
+            }
+            dot.style.left = x + 'px';
+            dot.style.top = y + 'px';
+        }
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

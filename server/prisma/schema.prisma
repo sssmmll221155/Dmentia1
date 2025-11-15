@@ -1,0 +1,177 @@
+// Cognitive Tracking System - Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// User accounts
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  deviceId     String?  // Desktop app device ID
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+}
+
+// Raw batch metrics (every 10 seconds of activity)
+model MetricsBatch {
+  id        String   @id @default(uuid())
+  userId    String
+  startedAt DateTime
+  endedAt   DateTime
+  createdAt DateTime @default(now())
+
+  // Page context
+  url    String
+  domain String
+
+  // Keyboard metrics
+  keyboardKeyPressCount            Int
+  keyboardBackspaceCount           Int
+  keyboardEnterCount               Int
+  keyboardMeanInterKeyIntervalMs   Float
+  keyboardStdInterKeyIntervalMs    Float
+  keyboardHoldTimes                String // JSON array of hold times (H)
+  keyboardDownDownIntervals        String // JSON array of DD intervals
+  keyboardUpDownIntervals          String // JSON array of UD intervals
+
+  // Mouse metrics
+  mouseMoveEventCount Int
+  mouseMeanSpeedPxPerSec Float
+  mouseStdSpeedPxPerSec  Float
+  mouseTotalDistancePx   Float
+  mouseClickCount        Int
+  mouseDblclickCount     Int
+
+  // Scroll metrics
+  scrollEventCount      Int
+  scrollMeanScrollSpeed Float
+  scrollUpScrollFraction Float
+
+  // Gaze metrics (nullable if eye tracking disabled)
+  gazeEventCount           Int?
+  gazeMeanFixationDurationMs Float?
+  gazeSaccadeCount         Int?
+  gazeMeanSaccadeLengthPx  Float?
+
+  // Relations
+  gazeEvents GazeEvent[]
+
+  @@index([userId, startedAt])
+  @@index([domain])
+}
+
+// Detailed gaze events (sampled subset)
+model GazeEvent {
+  id             String        @id @default(uuid())
+  batchId        String
+  batch          MetricsBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  timestamp      BigInt        // Unix timestamp in ms
+  x              Float
+  y              Float
+
+  @@index([batchId])
+}
+
+// Daily summary per user
+model DailySummary {
+  id        String   @id @default(uuid())
+  userId    String
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  // Activity metrics
+  totalActiveSeconds Float
+  totalBatches       Int
+
+  // Keyboard aggregates
+  avgKeyboardKeyPressRate          Float // keys per second
+  avgKeyboardErrorRate             Float // backspace / total keys
+  avgKeyboardInterKeyIntervalMs    Float
+  keyboardInterKeyVariabilityMs    Float // std dev
+  avgKeyboardHoldTimeMs            Float
+  stdKeyboardHoldTimeMs            Float
+
+  // Mouse aggregates
+  avgMouseSpeedPxPerSec    Float
+  stdMouseSpeedPxPerSec    Float
+  avgMouseDistancePerBatch Float
+
+  // Scroll aggregates
+  avgScrollSpeed         Float
+  scrollUpScrollFraction Float
+
+  // Gaze aggregates (nullable)
+  avgGazeFixationDurationMs Float?
+  avgGazeSaccadeCount       Float?
+  avgGazeSaccadeLengthPx    Float?
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+// User baseline (computed from first N weeks of data)
+model UserBaseline {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Baseline period
+  baselineStartDate DateTime
+  baselineEndDate   DateTime
+  dayCount          Int
+
+  // Keyboard baselines
+  baselineKeyPressRate         Float
+  baselineErrorRate            Float
+  baselineInterKeyIntervalMs   Float
+  baselineInterKeyVariabilityMs Float
+  baselineHoldTimeMs           Float
+
+  // Mouse baselines
+  baselineMouseSpeed    Float
+  baselineMouseSpeedStd Float
+
+  // Gaze baselines (nullable)
+  baselineFixationDurationMs Float?
+  baselineSaccadeCount       Float?
+
+  @@index([userId])
+}
+
+// Deviation alerts (when metrics drift from baseline)
+model DeviationAlert {
+  id        String   @id @default(uuid())
+  userId    String
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  // Alert metadata
+  severity  String // 'low', 'medium', 'high'
+  status    String @default("new") // 'new', 'acknowledged', 'resolved'
+
+  // Which metrics deviated
+  deviatedMetrics String // JSON string: { "keyboardErrorRate": { "baseline": 0.05, "current": 0.15, "stdDevs": 3.2 }, ... }
+
+  // Multi-modal correlation score (0-1)
+  // Higher = more metrics showing consistent deviation
+  correlationScore Float
+
+  // Human-readable summary
+  summary String
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@index([status])
+}

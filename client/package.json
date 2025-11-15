@@ -1,0 +1,14 @@
+{
+  "name": "@cognitive-tracker/client",
+  "version": "1.0.0",
+  "description": "Browser tracker module for cognitive monitoring",
+  "main": "dist/tracker.js",
+  "types": "dist/tracker.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
