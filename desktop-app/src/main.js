@@ -328,6 +328,11 @@ async function processBatch() {
 
   // Send to backend
   await sendMetrics(metrics);
+
+  // Notify dashboard
+  if (mainWindow) {
+    mainWindow.webContents.send('batch-sent', metrics);
+  }
 }
 
 /**
